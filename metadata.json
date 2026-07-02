@@ -1,0 +1,6 @@
+{
+  "name": "Tính TDEE & Macro Dinh Dưỡng",
+  "description": "Công cụ tính TDEE, Macro cá nhân hóa và gợi ý bù đắp thực phẩm thông minh dành cho gymer và người tập thể thao.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
