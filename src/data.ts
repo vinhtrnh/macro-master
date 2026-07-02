@@ -125,7 +125,8 @@ export const DEFAULT_PROFILES: Profile[] = [
     weight: 75,
     height: 175,
     activityLevel: 'moderately_active',
-    goal: 'cut_standard'
+    goal: 'cut_standard',
+    dailySteps: 10000
   },
   {
     id: 2,
@@ -135,6 +136,7 @@ export const DEFAULT_PROFILES: Profile[] = [
     weight: 54,
     height: 158,
     activityLevel: 'lightly_active',
-    goal: 'maintenance'
+    goal: 'maintenance',
+    dailySteps: 8000
   }
 ];

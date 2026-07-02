@@ -25,7 +25,11 @@ import {
   Award,
   ChevronRight,
   ShieldAlert,
-  Moon
+  Moon,
+  Calendar,
+  Footprints,
+  ChevronLeft,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Profile, FoodItem, LoggedMeal, Goal, ActivityLevel, Gender, FoodCategory } from './types';
@@ -36,7 +40,8 @@ import {
   calculateMacros, 
   getAssessment, 
   generateSmartSuggestions,
-  ACTIVITY_MULTIPLIERS
+  ACTIVITY_MULTIPLIERS,
+  calculateStepsCalories
 } from './utils';
 
 export default function App() {
@@ -57,14 +62,46 @@ export default function App() {
     return saved ? JSON.parse(saved) : DEFAULT_FOOD_ITEMS;
   });
 
-  // Logged Meals state keyed by profileId: { [profileId]: LoggedMeal[] }
-  const [loggedMealsByProfile, setLoggedMealsByProfile] = useState<Record<number, LoggedMeal[]>>(() => {
-    const saved = localStorage.getItem('gym_nutri_logged_meals');
-    return saved ? JSON.parse(saved) : { 1: [], 2: [] };
+  // Local helper to get current timezone-safe date string (YYYY-MM-DD)
+  const getTodayDateString = () => {
+    const today = new Date();
+    const offset = today.getTimezoneOffset();
+    const localToday = new Date(today.getTime() - (offset * 60 * 1000));
+    return localToday.toISOString().split('T')[0];
+  };
+
+  const [selectedDate, setSelectedDate] = useState<string>(getTodayDateString);
+
+  // Logged Meals state keyed by profileId and date string: { [profileId]: { [date]: LoggedMeal[] } }
+  const [loggedMealsByProfile, setLoggedMealsByProfile] = useState<Record<number, Record<string, LoggedMeal[]>>>(() => {
+    const saved = localStorage.getItem('gym_nutri_logged_meals_v2');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    // Attempt migration from old format
+    const oldSaved = localStorage.getItem('gym_nutri_logged_meals');
+    if (oldSaved) {
+      try {
+        const oldData = JSON.parse(oldSaved);
+        const newData: Record<number, Record<string, LoggedMeal[]>> = {};
+        const todayStr = new Date().toISOString().split('T')[0];
+        Object.keys(oldData).forEach((profId) => {
+          const id = Number(profId);
+          newData[id] = {
+            [todayStr]: oldData[id] || []
+          };
+        });
+        return newData;
+      } catch (e) {}
+    }
+    return { 1: {}, 2: {} };
   });
 
-  // Current logs for active profile
-  const activeLogs = loggedMealsByProfile[activeProfileId] || [];
+  // Current logs for active profile and active date
+  const activeProfileMeals = loggedMealsByProfile[activeProfileId] || {};
+  const activeLogs = activeProfileMeals[selectedDate] || [];
 
   // Edit Profile Mode
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -98,7 +135,7 @@ export default function App() {
   }, [foodDatabase]);
 
   useEffect(() => {
-    localStorage.setItem('gym_nutri_logged_meals', JSON.stringify(loggedMealsByProfile));
+    localStorage.setItem('gym_nutri_logged_meals_v2', JSON.stringify(loggedMealsByProfile));
   }, [loggedMealsByProfile]);
 
   // Update edit form when active profile changes
@@ -108,10 +145,15 @@ export default function App() {
 
   // Calculations
   const bmr = Math.round(calculateBMR(activeProfile));
-  const tdee = Math.round(calculateTDEE(bmr, activeProfile.activityLevel));
+  // Base TDEE from workout frequency
+  const baseTdee = Math.round(bmr * ACTIVITY_MULTIPLIERS[activeProfile.activityLevel]);
+  // Steps calorie burn (NEAT)
+  const stepsBurn = Math.round(calculateStepsCalories(activeProfile.dailySteps || 0, activeProfile.weight));
+  // Combined actual TDEE
+  const tdee = baseTdee + stepsBurn;
   const targetMacros = calculateMacros(activeProfile, tdee);
 
-  // Consumed calculations
+  // Consumed calculations for current active date
   const consumedProtein = Math.round(activeLogs.reduce((sum, item) => sum + item.protein, 0));
   const consumedCarbs = Math.round(activeLogs.reduce((sum, item) => sum + item.carbs, 0));
   const consumedFat = Math.round(activeLogs.reduce((sum, item) => sum + item.fat, 0));
@@ -132,6 +174,34 @@ export default function App() {
 
   // Nutritional Assessment
   const assessment = getAssessment(activeProfile, targetMacros.calories, bmr, consumedProtein);
+
+  // Helper to get week dates surrounding selectedDate
+  const getWeekDays = (currentDateStr: string) => {
+    const date = new Date(currentDateStr);
+    const day = date.getDay();
+    // Monday is index 0, Sunday is index 6. 
+    // Sunday in JS is 0, so if day is 0, offset is -6, otherwise day - 1.
+    const diffToMonday = date.getDate() - (day === 0 ? 6 : day - 1);
+    const monday = new Date(date.setDate(diffToMonday));
+
+    const days = [];
+    const dayNames = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'C.Nhật'];
+    
+    for (let i = 0; i < 7; i++) {
+      const nextDay = new Date(monday);
+      nextDay.setDate(monday.getDate() + i);
+      const dateStr = nextDay.toISOString().split('T')[0];
+      days.push({
+        dateStr,
+        dayLabel: dayNames[i],
+        dayNum: nextDay.getDate(),
+        isToday: dateStr === getTodayDateString()
+      });
+    }
+    return days;
+  };
+
+  const weekDays = getWeekDays(selectedDate);
 
   // Handle profile swap
   const handleProfileSwap = (id: number) => {
@@ -175,10 +245,17 @@ export default function App() {
       calories: Math.round(food.calories * multiplier)
     };
 
-    setLoggedMealsByProfile(prev => ({
-      ...prev,
-      [activeProfileId]: [...(prev[activeProfileId] || []), newLog]
-    }));
+    setLoggedMealsByProfile(prev => {
+      const profileMeals = prev[activeProfileId] || {};
+      const dateMeals = profileMeals[selectedDate] || [];
+      return {
+        ...prev,
+        [activeProfileId]: {
+          ...profileMeals,
+          [selectedDate]: [...dateMeals, newLog]
+        }
+      };
+    });
 
     // Reset log selection but keep active for convenience
     setLogAmount('100');
@@ -198,27 +275,47 @@ export default function App() {
       calories: Math.round(food.calories * multiplier)
     };
 
-    setLoggedMealsByProfile(prev => ({
-      ...prev,
-      [activeProfileId]: [...(prev[activeProfileId] || []), newLog]
-    }));
+    setLoggedMealsByProfile(prev => {
+      const profileMeals = prev[activeProfileId] || {};
+      const dateMeals = profileMeals[selectedDate] || [];
+      return {
+        ...prev,
+        [activeProfileId]: {
+          ...profileMeals,
+          [selectedDate]: [...dateMeals, newLog]
+        }
+      };
+    });
   };
 
   // Remove logged meal
   const handleRemoveLog = (logId: string) => {
-    setLoggedMealsByProfile(prev => ({
-      ...prev,
-      [activeProfileId]: (prev[activeProfileId] || []).filter(item => item.id !== logId)
-    }));
+    setLoggedMealsByProfile(prev => {
+      const profileMeals = prev[activeProfileId] || {};
+      const dateMeals = profileMeals[selectedDate] || [];
+      return {
+        ...prev,
+        [activeProfileId]: {
+          ...profileMeals,
+          [selectedDate]: dateMeals.filter(item => item.id !== logId)
+        }
+      };
+    });
   };
 
-  // Reset logs for today
+  // Reset logs for selectedDate
   const handleResetLogs = () => {
-    if (window.confirm('Bạn có chắc chắn muốn xóa toàn bộ nhật ký ăn uống hôm nay không?')) {
-      setLoggedMealsByProfile(prev => ({
-        ...prev,
-        [activeProfileId]: []
-      }));
+    if (window.confirm('Bạn có chắc chắn muốn xóa toàn bộ nhật ký ăn uống ngày hôm nay không?')) {
+      setLoggedMealsByProfile(prev => {
+        const profileMeals = prev[activeProfileId] || {};
+        return {
+          ...prev,
+          [activeProfileId]: {
+            ...profileMeals,
+            [selectedDate]: []
+          }
+        };
+      });
     }
   };
 
@@ -412,7 +509,7 @@ export default function App() {
                 transition={{ duration: 0.3 }}
                 className="overflow-hidden mt-6 pt-6 border-t border-slate-800"
               >
-                <form onSubmit={handleSaveProfile} className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <form onSubmit={handleSaveProfile} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-1">Tên Hiển Thị</label>
@@ -478,7 +575,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="md:col-span-1">
+                  <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-1">Cường độ vận động</label>
                     <select 
                       value={editForm.activityLevel}
@@ -493,7 +590,7 @@ export default function App() {
                     </select>
                   </div>
 
-                  <div className="md:col-span-1">
+                  <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-1">Mục tiêu Thể Hình</label>
                     <select 
                       value={editForm.goal}
@@ -508,17 +605,34 @@ export default function App() {
                     </select>
                   </div>
 
-                  <div className="flex items-end gap-2 md:col-span-1">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">Số bước chân mỗi ngày</label>
+                    <div className="relative">
+                      <input 
+                        type="number" 
+                        value={editForm.dailySteps || 0}
+                        min="0"
+                        max="50000"
+                        step="500"
+                        onChange={e => setEditForm({ ...editForm, dailySteps: parseInt(e.target.value) || 0 })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 font-mono"
+                        required
+                      />
+                      <span className="absolute right-3 top-2 text-xs text-slate-500 font-mono">bước</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-end gap-2 lg:col-span-2">
                     <button 
                       type="submit" 
-                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-colors cursor-pointer"
+                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-sm transition-colors cursor-pointer"
                     >
                       Cập Nhật
                     </button>
                     <button 
                       type="button" 
                       onClick={() => setIsEditingProfile(false)}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium px-3 py-2 rounded-xl text-sm transition-colors cursor-pointer"
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium px-4 py-2.5 rounded-xl text-sm transition-colors cursor-pointer"
                     >
                       Hủy
                     </button>
@@ -528,6 +642,156 @@ export default function App() {
               </motion.div>
             )}
           </AnimatePresence>
+        </div>
+
+        {/* Weekly Calendar & Nutrition Tracker Section */}
+        <div className="bg-slate-900/40 backdrop-blur-md rounded-3xl border border-slate-800/80 p-5 mb-6 shadow-lg">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4">
+            <div>
+              <h3 className="text-lg font-bold font-display text-white flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-emerald-400" />
+                <span>Nhật Ký & Theo Dõi Dinh Dưỡng Tuần</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Click chọn ngày bất kỳ trong tuần để đổi ngày xem/ghi chép nhật ký món ăn của ngày đó
+              </p>
+            </div>
+            
+            {/* Week Navigators */}
+            <div className="flex items-center gap-2 self-stretch md:self-auto justify-between">
+              <button
+                onClick={() => {
+                  const d = new Date(selectedDate);
+                  d.setDate(d.getDate() - 7);
+                  setSelectedDate(d.toISOString().split('T')[0]);
+                }}
+                className="p-2 bg-slate-950/60 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer"
+                title="Tuần trước"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setSelectedDate(getTodayDateString())}
+                className="px-3.5 py-1.5 bg-slate-950/80 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-300 hover:text-emerald-400 transition-colors cursor-pointer font-mono"
+              >
+                Hôm Nay
+              </button>
+              <button
+                onClick={() => {
+                  const d = new Date(selectedDate);
+                  d.setDate(d.getDate() + 7);
+                  setSelectedDate(d.toISOString().split('T')[0]);
+                }}
+                className="p-2 bg-slate-950/60 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer"
+                title="Tuần sau"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* 7-Day Weekly Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+            {weekDays.map(day => {
+              // Calculate day's consumed calories
+              const dayMeals = activeProfileMeals[day.dateStr] || [];
+              const dayConsumed = Math.round(dayMeals.reduce((sum, item) => sum + item.calories, 0));
+              const isSelected = selectedDate === day.dateStr;
+              
+              // Target calories
+              const targetCal = targetMacros.calories;
+              const percent = Math.min(100, Math.round((dayConsumed / targetCal) * 100));
+              
+              // Calorie difference
+              const diff = dayConsumed - targetCal;
+              const hasLogs = dayMeals.length > 0;
+
+              return (
+                <button
+                  key={day.dateStr}
+                  onClick={() => setSelectedDate(day.dateStr)}
+                  className={`p-3.5 rounded-2xl border transition-all duration-300 flex flex-col justify-between text-left relative cursor-pointer group ${
+                    isSelected
+                      ? 'bg-emerald-500/10 border-emerald-500/40 shadow-emerald-500/5 shadow-lg'
+                      : 'bg-slate-950/30 border-slate-800 hover:border-slate-700/80 hover:bg-slate-950/60'
+                  }`}
+                >
+                  {/* Today dot indicator */}
+                  {day.isToday && (
+                    <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-emerald-400 rounded-full border border-slate-950" title="Hôm nay" />
+                  )}
+
+                  {/* Header info */}
+                  <div>
+                    <span className="block text-[10px] font-mono tracking-wider text-slate-500 uppercase">
+                      {day.dayLabel}
+                    </span>
+                    <span className="text-base font-black font-display text-white">
+                      {day.dayNum}
+                    </span>
+                  </div>
+
+                  {/* Mini graph representation */}
+                  <div className="my-3 h-1.5 bg-slate-800 rounded-full overflow-hidden w-full relative">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        percent === 0
+                          ? 'bg-transparent'
+                          : percent > 105
+                            ? 'bg-amber-500' // exceeded
+                            : percent >= 90
+                              ? 'bg-emerald-400' // met target
+                              : 'bg-teal-500' // still has deficit
+                      }`}
+                      style={{ width: `${percent}%` }}
+                    />
+                  </div>
+
+                  {/* Bottom values */}
+                  <div className="space-y-0.5">
+                    <span className="block text-xs font-bold font-mono text-slate-300">
+                      {dayConsumed > 0 ? `${dayConsumed.toLocaleString()} kcal` : 'Trống'}
+                    </span>
+                    
+                    {/* Deficit / Surplus text logic */}
+                    {dayConsumed > 0 ? (
+                      <span className={`text-[10px] font-mono font-bold block ${
+                        diff > 0
+                          ? 'text-amber-400'
+                          : diff < 0
+                            ? 'text-teal-400'
+                            : 'text-emerald-400'
+                      }`}>
+                        {diff > 0 ? `Dư +${diff}` : diff < 0 ? `Hụt ${diff}` : 'Đạt chuẩn ✓'}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-500 block">--</span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Current Date banner info */}
+          <div className="mt-4 pt-3.5 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-1.5 text-slate-400">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Đang xem nhật ký ngày:</span>
+              <strong className="text-emerald-400 font-mono">
+                {new Date(selectedDate).toLocaleDateString('vi-VN', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })}
+              </strong>
+            </div>
+            
+            <div className="text-slate-500 text-[11px] italic">
+              *Tất cả thay đổi món ăn hằng ngày của bạn sẽ tự động lưu lại theo từng ngày đã chọn.
+            </div>
+          </div>
         </div>
 
         {/* Diagnostic Dashboard Grid */}
@@ -542,39 +806,73 @@ export default function App() {
               </div>
               <h3 className="text-lg font-bold font-display text-white mb-4">Mức Tiêu Thụ Năng Lượng</h3>
 
-              <div className="space-y-4">
-                <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/50 flex items-center justify-between">
+              <div className="space-y-3">
+                
+                {/* 1. BMR */}
+                <div className="bg-slate-950/40 p-3.5 rounded-2xl border border-slate-800/50 flex items-center justify-between">
                   <div>
-                    <span className="text-xs text-slate-400 block">Tốc độ trao đổi chất cơ bản (BMR)</span>
-                    <span className="text-slate-500 text-[10px]">Mifflin-St Jeor Equation</span>
+                    <span className="text-xs text-slate-300 block font-medium">BMR (Chuyển hóa cơ bản)</span>
+                    <span className="text-slate-500 text-[10px]">Năng lượng sống tối thiểu</span>
                   </div>
                   <div className="text-right">
-                    <span className="text-xl font-bold font-mono text-teal-400">{bmr}</span>
-                    <span className="text-xs text-slate-500 block">kcal / ngày</span>
+                    <span className="text-base font-bold font-mono text-teal-400">{bmr}</span>
+                    <span className="text-[10px] text-slate-500 block">kcal</span>
                   </div>
                 </div>
 
-                <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/50 flex items-center justify-between">
+                {/* 2. Gym / Training calories */}
+                <div className="bg-slate-950/40 p-3.5 rounded-2xl border border-slate-800/50 flex items-center justify-between">
                   <div>
-                    <span className="text-xs text-slate-400 block">Năng lượng duy trì (TDEE)</span>
-                    <span className="text-slate-500 text-[10px]">Nhân theo cường độ vận động</span>
+                    <span className="text-xs text-slate-300 block font-medium">Luyện tập & Gym</span>
+                    <span className="text-slate-500 text-[10px]">Theo mức vận động đã chọn</span>
                   </div>
                   <div className="text-right">
-                    <span className="text-xl font-bold font-mono text-amber-400">{tdee}</span>
-                    <span className="text-xs text-slate-500 block">kcal / ngày</span>
+                    <span className="text-base font-bold font-mono text-indigo-400">+{baseTdee - bmr}</span>
+                    <span className="text-[10px] text-slate-500 block">kcal</span>
                   </div>
                 </div>
 
-                <div className="bg-emerald-500/5 p-4 rounded-2xl border border-emerald-500/20 flex items-center justify-between">
+                {/* 3. Steps NEAT calories */}
+                <div className="bg-slate-950/40 p-3.5 rounded-2xl border border-slate-800/50 flex items-center justify-between">
                   <div>
-                    <span className="text-xs text-emerald-400 font-semibold block">Mục tiêu Calo hằng ngày</span>
-                    <span className="text-emerald-500/60 text-[10px]">Theo mục tiêu thể hình đã chọn</span>
+                    <span className="text-xs text-slate-300 block font-medium flex items-center gap-1">
+                      <Footprints className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Vận động phụ (NEAT)</span>
+                    </span>
+                    <span className="text-emerald-500/70 text-[10px] font-mono">
+                      {activeProfile.dailySteps?.toLocaleString() || 0} bước chân / ngày
+                    </span>
                   </div>
                   <div className="text-right">
-                    <span className="text-2xl font-black font-mono text-emerald-400">{targetMacros.calories}</span>
-                    <span className="text-xs text-emerald-500 block font-medium">kcal / ngày</span>
+                    <span className="text-base font-bold font-mono text-emerald-400">+{stepsBurn}</span>
+                    <span className="text-[10px] text-slate-500 block">kcal</span>
                   </div>
                 </div>
+
+                {/* 4. Total actual TDEE */}
+                <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-750 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs text-amber-300 font-semibold block">Tổng TDEE Thực Tế</span>
+                    <span className="text-slate-500 text-[10px]">Tổng năng lượng tiêu thụ/ngày</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-lg font-black font-mono text-amber-400">{tdee}</span>
+                    <span className="text-[10px] text-slate-500 block">kcal</span>
+                  </div>
+                </div>
+
+                {/* 5. Recommended targets */}
+                <div className="bg-emerald-500/5 p-4 rounded-2xl border border-emerald-500/20 flex items-center justify-between mt-1">
+                  <div>
+                    <span className="text-xs text-emerald-400 font-bold block">Mục tiêu Calo đề xuất</span>
+                    <span className="text-emerald-500/60 text-[10px]">Phù hợp với mục tiêu giảm/tăng cân</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xl font-black font-mono text-emerald-400">{targetMacros.calories}</span>
+                    <span className="text-xs text-emerald-500 block font-semibold">kcal / ngày</span>
+                  </div>
+                </div>
+
               </div>
             </div>
 

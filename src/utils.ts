@@ -19,8 +19,16 @@ export const ACTIVITY_MULTIPLIERS: Record<ActivityLevel, number> = {
   extra_active: 1.9,       // Vận động rất nặng (VĐV, lao động nặng)
 };
 
-export function calculateTDEE(bmr: number, activityLevel: ActivityLevel): number {
-  return Math.round(bmr * ACTIVITY_MULTIPLIERS[activityLevel]);
+export function calculateStepsCalories(steps: number, weight: number): number {
+  // 1 step is approx 0.04 calories for a 70kg person.
+  // Formula adjusted for body weight: steps * 0.04 * (weight / 70)
+  return Math.round(steps * 0.04 * (weight / 70));
+}
+
+export function calculateTDEE(bmr: number, activityLevel: ActivityLevel, steps: number = 0, weight: number = 70): number {
+  const baseTdee = bmr * ACTIVITY_MULTIPLIERS[activityLevel];
+  const stepsCalories = calculateStepsCalories(steps, weight);
+  return Math.round(baseTdee + stepsCalories);
 }
 
 export interface MacroSplit {

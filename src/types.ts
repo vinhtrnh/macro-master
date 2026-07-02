@@ -23,6 +23,7 @@ export interface Profile {
   height: number; // cm
   activityLevel: ActivityLevel;
   goal: Goal;
+  dailySteps?: number; // customizable daily step count
 }
 
 export type FoodCategory = 'protein' | 'carbs' | 'fats' | 'custom';
