@@ -10,6 +10,45 @@ export function calculateBMR(profile: Profile): number {
   }
 }
 
+export function parseVoiceFoodInput(text: string): {
+  name: string; amount: number; protein: number; carbs: number; fat: number;
+} | null {
+  // Chuẩn hóa chuỗi, bỏ phẩy, chấm, chuyển chữ thường
+  const cleanText = text.replace(/[,.]/g, ' ').toLowerCase();
+
+  // 1. Khối lượng: Đảo thứ tự (gram|gam|g) để nó ưu tiên bắt từ dài trước, hết bị lỗi "Am"
+  const amountMatch = cleanText.match(/(\d+(?:\.\d+)?)\s*(?:gram|gam|g)/i);
+  if (!amountMatch) return null;
+  const amount = parseFloat(amountMatch[1]);
+
+  // 2. Macro: Cho phép chèn thêm chữ "g", "gam" vào giữa số lượng và tên chất
+  const proteinMatch = cleanText.match(/(\d+(?:\.\d+)?)\s*(?:gram|gam|g)?\s*(?:protein|đạm|pro)/i);
+  const carbsMatch = cleanText.match(/(\d+(?:\.\d+)?)\s*(?:gram|gam|g)?\s*(?:carb|tinh bột)/i);
+  const fatMatch = cleanText.match(/(\d+(?:\.\d+)?)\s*(?:gram|gam|g)?\s*(?:fat|béo|chất béo)/i);
+
+  // 3. Cắt bỏ hết những thông số vừa tìm được ra khỏi câu gốc
+  let name = cleanText
+    .replace(amountMatch[0], '') 
+    .replace(proteinMatch ? proteinMatch[0] : '', '') 
+    .replace(carbsMatch ? carbsMatch[0] : '', '') 
+    .replace(fatMatch ? fatMatch[0] : '', '');
+    
+  // 4. Dọn nốt các từ nối "và", "có", "chứa"... (nếu lúc đọc lỡ đệm vào)
+  name = name.replace(/\b(có|chứa|khoảng|với|và)\b/gi, ' ');
+  name = name.replace(/\s+/g, ' ').trim();
+
+  // Viết hoa chữ cái đầu cho chuẩn form
+  const formattedName = name.charAt(0).toUpperCase() + name.slice(1);
+
+  return {
+    amount,
+    name: formattedName || "Món ăn",
+    protein: proteinMatch ? parseFloat(proteinMatch[1]) : 0,
+    carbs: carbsMatch ? parseFloat(carbsMatch[1]) : 0,
+    fat: fatMatch ? parseFloat(fatMatch[1]) : 0,
+  };
+}
+
 // TDEE Multipliers
 export const ACTIVITY_MULTIPLIERS: Record<ActivityLevel, number> = {
   sedentary: 1.2,          // Ít vận động
@@ -75,6 +114,27 @@ export function calculateMacros(profile: Profile, tdee: number): MacroSplit {
       break;
   }
 
+  // ===== FEATURE 2: DIET TYPE OVERRIDE =====
+  // Nếu user chọn chế độ ăn cụ thể (khác 'standard'), ghi đè 2 biến điều khiển
+  // (proteinRatio, fatPercentOfCal) theo đúng tỷ lệ % đã chọn — thay vì dùng
+  // công thức g/kg mặc định theo goal ở trên. Toàn bộ logic an toàn phía dưới
+  // (min calories, min carbs) không đổi gì, vẫn áp dụng bình thường vì nó
+  // chạy SAU đoạn này, dựa trên đúng 2 biến vừa được ghi đè.
+  const DIET_TYPE_RATIOS: Partial<Record<NonNullable<Profile['dietType']>, { p: number; f: number }>> = {
+    low_carb: { p: 0.30, f: 0.50 },   // 30% protein / 20% carb / 50% fat
+    high_carb: { p: 0.20, f: 0.30 },  // 20% protein / 50% carb / 30% fat
+  };
+  const dietOverride = profile.dietType ? DIET_TYPE_RATIOS[profile.dietType] : undefined;
+  if (dietOverride) {
+    // Đổi từ "% protein trên tổng calo" sang "g/kg cân nặng" để tái dùng
+    // đúng công thức protein = proteinRatio * weight ở bước 1 bên dưới,
+    // không cần sửa gì thêm ở phần logic phía sau.
+    const proteinGramsFromPercent = (calories * dietOverride.p) / 4;
+    proteinRatio = proteinGramsFromPercent / profile.weight;
+    fatPercentOfCal = dietOverride.f;
+  }
+  // ===== HẾT PHẦN FEATURE 2 =====
+
   // Ensure calories don't drop to absurdly low values (safety cap)
   const minSafeCalories = Math.max(1200, profile.gender === 'male' ? 1500 : 1200);
   if (calories < minSafeCalories) {
@@ -94,7 +154,7 @@ export function calculateMacros(profile: Profile, tdee: number): MacroSplit {
   let carbs = Math.round(carbsCal / 4);
   let isAdjustedForSafety = false;
 
-  // Sports Nutrition Safeguard: Carbs should be at least 1.0g per kg of body weight for energy and brain function
+  // Sports Nutrition Safeguard: Carbs should be at least 1.0g per kg of body weight
   const minCarbs = Math.round(1.0 * profile.weight);
   if (carbs < minCarbs) {
     carbs = minCarbs;
@@ -119,6 +179,63 @@ export function calculateMacros(profile: Profile, tdee: number): MacroSplit {
     fatPercent,
     isAdjustedForSafety
   };
+}
+
+// Thêm vào utils.ts
+// Thêm vào utils.ts
+// Thêm/Sửa vào utils.ts
+// Sửa trong file utils.ts
+export function calculateQuickMealPlan(
+  calorieGap: number, // TRUYỀN THÊM CALO GAP VÀO ĐÂY LÀM MỎ NEO
+  macroGaps: { protein: number; carbs: number; fat: number },
+  proteinFood: FoodItem, carbFood: FoodItem, fatFood: FoodItem
+) {
+  if (calorieGap <= 0) return [];
+
+  // Bước 1: Quy đổi Macro còn thiếu ra tỷ lệ Calo (P: 4, C: 4, F: 9)
+  const pCal = Math.max(0, macroGaps.protein * 4);
+  const cCal = Math.max(0, macroGaps.carbs * 4);
+  const fCal = Math.max(0, macroGaps.fat * 9);
+  const totalMacroCal = pCal + cCal + fCal || 1; // Tránh lỗi chia cho 0
+
+  // Bước 2: Phân bổ Tỷ lệ % Calo cần nạp cho 3 món
+  const pRatio = pCal / totalMacroCal;
+  const cRatio = cCal / totalMacroCal;
+  const fRatio = fCal / totalMacroCal;
+
+  const plan = [];
+
+  // Bước 3: Tính Gram thức ăn chốt cứng theo Calo phân bổ (KHÔNG THỂ VƯỢT CALO GAP)
+  if (pRatio > 0 && proteinFood) {
+    const assignedCal = calorieGap * pRatio;
+    const grams = Math.max(0, Math.round((assignedCal / (proteinFood.calories || 1)) * 100));
+    if (grams > 0) plan.push({ food: proteinFood, grams });
+  }
+
+  if (cRatio > 0 && carbFood) {
+    const assignedCal = calorieGap * cRatio;
+    const grams = Math.max(0, Math.round((assignedCal / (carbFood.calories || 1)) * 100));
+    if (grams > 0) plan.push({ food: carbFood, grams });
+  }
+
+  if (fRatio > 0 && fatFood) {
+    const assignedCal = calorieGap * fRatio;
+    const grams = Math.max(0, Math.round((assignedCal / (fatFood.calories || 1)) * 100));
+    if (grams > 0) plan.push({ food: fatFood, grams });
+  }
+
+  return plan;
+}
+
+// Hàm phụ: tìm món ăn theo tên (gần đúng) trong 1 category cụ thể
+// Dùng cho cả UI picker lẫn agent voice (agent gửi tên dạng text tự do)
+export function findFoodByNameInCategory(
+  foodDatabase: FoodItem[], name: string, category: 'protein' | 'carbs' | 'fats'
+): FoodItem | undefined {
+  const normalized = name.toLowerCase().trim();
+  return foodDatabase.find(
+    f => f.category === category && f.name.toLowerCase().includes(normalized)
+  ) || foodDatabase.find(f => f.category === category); // fallback: món đầu tiên trong category nếu không khớp tên
 }
 
 // Sports Nutritionist Assessment

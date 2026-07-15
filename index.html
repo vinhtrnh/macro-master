@@ -3,11 +3,55 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
+    <title>MACRO MASTER BRO</title>
+    <link rel="icon" type="image/x-icon" href="assets\.aistudio\balance-measure-weight-icon-vector-12827949.avif">
   </head>
   <body>
     <div id="root"></div>
+
     <script type="module" src="/src/main.tsx"></script>
+
+    <elevenlabs-convai agent-id="agent_8901kx74zj3xf54bycq750f242bs"></elevenlabs-convai>
+    <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const widget = document.querySelector("elevenlabs-convai");
+    if (widget) {
+      widget.addEventListener("elevenlabs-convai:call", (event) => {
+        event.detail.config.clientTools = {
+          open_edit_profile: () => {
+            document.dispatchEvent(new CustomEvent("macro-master:edit-profile"));
+            return "Tôi đã mở form chỉnh sửa hồ sơ trên màn hình cho bạn.";
+          },
+          open_add_food: () => {
+            document.dispatchEvent(new CustomEvent("macro-master:add-food"));
+            return "Tôi đã mở form thêm món ăn. Bạn có thể tự nhập tay nếu muốn.";
+          },
+          update_weight: ({ weight }) => {
+            if (window.updateWeight) return window.updateWeight(weight);
+            return "Lỗi nội bộ: Không tìm thấy hàm cập nhật cân nặng.";
+          },
+          get_macro_summary: () => {
+            if (window.getMacroSummary) return window.getMacroSummary();
+            return "Lỗi nội bộ: Không thể lấy dữ liệu thực đơn.";
+          },
+          get_workout_schedule: () => {
+            if (window.getWorkoutSchedule) return window.getWorkoutSchedule();
+            return "Lỗi nội bộ: Không thể kết nối với kho dữ liệu Notion.";
+          },
+          add_food_log: ({ name, amount, protein, carbs, fat }) => {
+            if (window.addFoodDirectly) return window.addFoodDirectly(name, amount, protein, carbs, fat);
+            return "Lỗi nội bộ: Không thể thêm món ăn.";
+          },
+          suggest_quick_meal: ({ protein_food, carb_food, fat_food }) => {
+            if (window.suggestQuickMeal) return window.suggestQuickMeal(protein_food, carb_food, fat_food);
+            return "Lỗi nội bộ: không thể tạo gợi ý thực đơn.";
+          },
+        };
+      });
+    }
+  });
+</script>
   </body>
 </html>
 

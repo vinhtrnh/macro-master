@@ -1,3 +1,5 @@
+export type DietType = 'standard' | 'low_carb' | 'high_carb';
+
 export type Gender = 'male' | 'female';
 
 export type ActivityLevel = 
@@ -24,6 +26,7 @@ export interface Profile {
   activityLevel: ActivityLevel;
   goal: Goal;
   dailySteps?: number; // customizable daily step count
+  dietType: DietType;
 }
 
 export type FoodCategory = 'protein' | 'carbs' | 'fats' | 'custom';
