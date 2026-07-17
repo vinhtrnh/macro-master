@@ -65,9 +65,19 @@ export function calculateStepsCalories(steps: number, weight: number): number {
 }
 
 export function calculateTDEE(bmr: number, activityLevel: ActivityLevel, steps: number = 0, weight: number = 70): number {
-  const baseTdee = bmr * ACTIVITY_MULTIPLIERS[activityLevel];
+  // 1. Chỉ lấy hệ số Sedentary (1.2) làm nền cho sinh hoạt nhẹ nhàng
+  const sedentaryTdee = bmr * 1.2; 
+  
+  // 2. Cộng calo từ số bước chân (NEAT)
   const stepsCalories = calculateStepsCalories(steps, weight);
-  return Math.round(baseTdee + stepsCalories);
+  
+  // 3. Cộng calo từ buổi tập (Ước tính 350 kcal cho 1h15p tập tạ nặng)
+  const trainingCalories = 350; 
+  
+  // 4. Nếu fen tập 5-6 buổi/tuần, hãy chia trung bình calo tập cho cả tuần
+  const weeklyTrainingBurn = (trainingCalories * 6) / 7; 
+
+  return Math.round(sedentaryTdee + stepsCalories + weeklyTrainingBurn);
 }
 
 export interface MacroSplit {

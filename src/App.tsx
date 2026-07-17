@@ -176,9 +176,19 @@ const [quickMealPick, setQuickMealPick] = useState<{ protein?: string; carbs?: s
   }, [activeProfileId, activeProfile]);
 
   const bmr = Math.round(calculateBMR(activeProfile));
-  const baseTdee = Math.round(bmr * ACTIVITY_MULTIPLIERS[activeProfile.activityLevel]);
+  
+  // 1. Chốt cứng hệ số nền 1.2 (Sedentary) cho sinh hoạt
+  const baseTdee = Math.round(bmr * 1.2); 
+  
+  // 2. Tính Calo từ bước chân (NEAT)
   const stepsBurn = Math.round(calculateStepsCalories(activeProfile.dailySteps || 0, activeProfile.weight));
-  const tdee = baseTdee + stepsBurn;
+  
+  // 3. Tính Calo từ tập tạ (EAT) - Chốt 300 kcal trung bình/ngày
+  const trainingBurn = 300;
+  
+  // 4. Tổng TDEE thực tế
+  const tdee = baseTdee + stepsBurn + trainingBurn;
+  
   const targetMacros = calculateMacros(activeProfile, tdee);
 
   const consumedProtein = Math.round(activeLogs.reduce((sum, item) => sum + item.protein, 0));
@@ -897,7 +907,7 @@ const handleApplyQuickMealPlan = (proteinFood: FoodItem, carbFood: FoodItem, fat
                     <span className="text-slate-500 text-[10px]">Theo mức vận động đã chọn</span>
                   </div>
                   <div className="text-right">
-                    <span className="text-base font-bold font-mono text-indigo-400">+{baseTdee - bmr}</span>
+                    <span className="text-base font-bold font-mono text-indigo-400">+{trainingBurn}</span>
                     <span className="text-[10px] text-slate-500 block">kcal</span>
                   </div>
                 </div>
