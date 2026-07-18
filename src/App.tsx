@@ -1211,6 +1211,33 @@ const handleApplyQuickMealPlan = (proteinFood: FoodItem, carbFood: FoodItem, fat
                   </div>
                 </div>
 
+               <div className="sm:col-span-2">
+                  <label className="block text-xs text-slate-400 mb-1 font-semibold">Khối lượng đã ăn (gram)</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      placeholder="100"
+                      value={logAmount}
+                      onChange={e => setLogAmount(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 pr-10"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-mono">g</span>
+                  </div>
+                  {selectedFoodId && (() => {
+                    const food = foodDatabase.find(f => f.id === selectedFoodId);
+                    const amt = parseFloat(logAmount);
+                    if (!food || isNaN(amt) || amt <= 0) return null;
+                    const m = amt / 100;
+                    return (
+                      <p className="text-[11px] text-slate-500 mt-1 font-mono">
+                        {Math.round(food.calories * m)} kcal · {(food.protein * m).toFixed(1)}P · {(food.carbs * m).toFixed(1)}C · {(food.fat * m).toFixed(1)}F
+                      </p>
+                    );
+                  })()}
+                </div>
+
                 <button type="submit" disabled={!selectedFoodId} className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-3 px-4 rounded-xl text-sm transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer">
                   <Plus className="w-4 h-4" />
                   <span>Thêm Vào Thực Đơn Hôm Nay</span>
@@ -1411,7 +1438,17 @@ const handleApplyQuickMealPlan = (proteinFood: FoodItem, carbFood: FoodItem, fat
                   </div>
                   {error && <span className="text-xs text-red-400 bg-red-500/10 p-2 rounded-lg border border-red-500/20">{error}</span>}
                 </div>
-
+                   <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Tên món ăn</label>
+                  <input
+                    type="text"
+                    placeholder="Ví dụ: Ức gà áp chảo"
+                    value={customFoodForm.name}
+                    onChange={e => setCustomFoodForm({ ...customFoodForm, name: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
+                    required
+                  />
+                </div>    
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-1">Nhóm dinh dưỡng</label>
