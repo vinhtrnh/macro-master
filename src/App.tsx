@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSpeechToText } from './useSpeechToText';
 import { parseVoiceFoodInput } from './utils';
 import { 
@@ -54,6 +54,41 @@ import {
   ACTIVITY_MULTIPLIERS,
   calculateStepsCalories
 } from './utils';
+
+// --- SYNC DATA LÊN SERVER (Upstash Redis qua /api/sync) ---
+// Cho phép nhiều thiết bị dùng chung 1 nguồn data, không cần nhập lại tay.
+const SYNC_SECRET = (import.meta as any).env?.VITE_SYNC_SECRET || '';
+
+function syncHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (SYNC_SECRET) headers['x-sync-secret'] = SYNC_SECRET;
+  return headers;
+}
+
+async function fetchCloudData(): Promise<any | null> {
+  try {
+    const res = await fetch('/api/sync', { headers: syncHeaders() });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json?.data || null;
+  } catch (e) {
+    console.warn('[SYNC] Không tải được data từ server, dùng data local.', e);
+    return null;
+  }
+}
+
+async function pushCloudData(payload: any): Promise<void> {
+  try {
+    await fetch('/api/sync', {
+      method: 'POST',
+      headers: syncHeaders(),
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    console.warn('[SYNC] Không lưu được data lên server, data vẫn an toàn ở localStorage.', e);
+  }
+}
+// -----------------------------------------------------------
 
 // Khai báo cho AI gọi thẳng vào giao diện
 declare global {
@@ -170,6 +205,40 @@ const [quickMealPick, setQuickMealPick] = useState<{ protein?: string; carbs?: s
   useEffect(() => {
     localStorage.setItem('gym_nutri_logged_meals_v2', JSON.stringify(loggedMealsByProfile));
   }, [loggedMealsByProfile]);
+
+  // --- SYNC: tải data từ server khi mở app (server là nguồn chuẩn giữa các thiết bị) ---
+  const isCloudLoaded = useRef(false);
+  const [cloudStatus, setCloudStatus] = useState<'loading' | 'synced' | 'offline'>('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCloudData().then((cloud) => {
+      if (cancelled) return;
+      if (cloud) {
+        if (cloud.profiles) setProfiles(cloud.profiles);
+        if (cloud.foodDatabase) setFoodDatabase(cloud.foodDatabase);
+        if (cloud.loggedMealsByProfile) setLoggedMealsByProfile(cloud.loggedMealsByProfile);
+        setCloudStatus('synced');
+      } else {
+        setCloudStatus('offline');
+      }
+      isCloudLoaded.current = true;
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // --- SYNC: đẩy data lên server mỗi khi có thay đổi (debounce 1.2s) ---
+  const syncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!isCloudLoaded.current) return; // Chưa load xong từ cloud thì đừng ghi đè
+    if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+    syncDebounceRef.current = setTimeout(() => {
+      pushCloudData({ profiles, foodDatabase, loggedMealsByProfile }).then(() => setCloudStatus('synced'));
+    }, 1200);
+    return () => {
+      if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+    };
+  }, [profiles, foodDatabase, loggedMealsByProfile]);
 
   useEffect(() => {
     setEditForm({ ...activeProfile });
@@ -457,6 +526,12 @@ const handleApplyQuickMealPlan = (proteinFood: FoodItem, carbFood: FoodItem, fat
               </h1>
               <p className="text-xs text-slate-400 font-mono">CHUYÊN GIA DINH DƯỠNG THỂ THAO</p>
             </div>
+            <span
+              title={cloudStatus === 'synced' ? 'Đã đồng bộ lên server' : cloudStatus === 'loading' ? 'Đang tải dữ liệu...' : 'Không kết nối được server, đang dùng dữ liệu local'}
+              className={`ml-1 w-2 h-2 rounded-full ${
+                cloudStatus === 'synced' ? 'bg-emerald-400' : cloudStatus === 'loading' ? 'bg-amber-400 animate-pulse' : 'bg-red-500'
+              }`}
+            />
           </div>
           <div className="flex items-center gap-2 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
             {profiles.map(p => (
