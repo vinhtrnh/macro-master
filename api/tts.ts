@@ -2,13 +2,16 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { isAuthorized } from './_auth';
 
-// Ép dotenv load ĐÚNG file .env ở gốc project, bất kể vercel dev
-// đang chạy function từ thư mục nào
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 export default async function handler(req: any, res: any) {
+  if (!isAuthorized(req)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).send('Method not allowed');
   }

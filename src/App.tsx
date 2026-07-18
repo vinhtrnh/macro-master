@@ -54,15 +54,12 @@ import {
   ACTIVITY_MULTIPLIERS,
   calculateStepsCalories
 } from './utils';
-
+import { authHeaders } from './apiAuth';
 // --- SYNC DATA LÊN SERVER (Upstash Redis qua /api/sync) ---
 // Cho phép nhiều thiết bị dùng chung 1 nguồn data, không cần nhập lại tay.
-const SYNC_SECRET = (import.meta as any).env?.VITE_SYNC_SECRET || '';
 
 function syncHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (SYNC_SECRET) headers['x-sync-secret'] = SYNC_SECRET;
-  return headers;
+  return authHeaders({ 'Content-Type': 'application/json' });
 }
 
 async function fetchCloudData(): Promise<any | null> {
@@ -139,7 +136,7 @@ export default function App() {
 
   useEffect(() => {
     setGymLog(null); 
-    fetch(`/api/gym-log-today?profileId=${activeProfileId}&date=${selectedDate}`)
+    fetch(`/api/gym-log-today?profileId=${activeProfileId}&date=${selectedDate}`, { headers: authHeaders() })
       .then(res => res.json())
       .then(data => {
         // LỌC RÁC: Nếu tìm thấy page trên Notion NHƯNG tiêu đề chứa chữ "Báo cáo" -> Đánh dấu là ngày nghỉ

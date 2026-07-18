@@ -1,6 +1,6 @@
 // src/useTextToSpeech.ts
 import { useState, useRef, useCallback } from 'react';
-
+import { authHeaders } from './apiAuth';
 export function useTextToSpeech() {
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -19,9 +19,9 @@ export function useTextToSpeech() {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/tts', {
+    const res = await fetch('/api/tts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ text }),
       });
 

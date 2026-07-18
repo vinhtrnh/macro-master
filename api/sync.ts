@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { Redis } from '@upstash/redis';
+import { isAuthorized } from './_auth';
 
 const envPath = path.resolve(process.cwd(), '.env');
 const envLocalPath = path.resolve(process.cwd(), '.env.local');
@@ -12,7 +13,6 @@ if (fs.existsSync(envLocalPath)) {
   dotenv.config({ path: envPath });
 }
 
-// Key duy nhất trong Redis lưu toàn bộ data của app (vì chỉ 1 user dùng).
 const DATA_KEY = 'macro_master_data_v1';
 
 function getRedis() {
@@ -20,14 +20,6 @@ function getRedis() {
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) return null;
   return new Redis({ url, token });
-}
-
-function isAuthorized(req: any): boolean {
-  const secret = process.env.SYNC_SECRET;
-  // Nếu chưa cấu hình SYNC_SECRET thì bỏ qua check (tiện lúc mới setup local).
-  if (!secret) return true;
-  const provided = req.headers['x-sync-secret'];
-  return provided === secret;
 }
 
 export default async function handler(req: any, res: any) {
