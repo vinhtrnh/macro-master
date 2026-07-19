@@ -1,6 +1,7 @@
 // src/useTextToSpeech.ts
 import { useState, useRef, useCallback } from 'react';
 import { authHeaders } from './apiAuth';
+
 export function useTextToSpeech() {
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -19,16 +20,32 @@ export function useTextToSpeech() {
     setIsLoading(true);
 
     try {
-    const res = await fetch('/api/tts', {
+      const res = await fetch('/api/tts', {
         method: 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ text }),
       });
 
       if (!res.ok) {
-        // Đọc lỗi trả về từ serverless function (đã forward nguyên lỗi ElevenLabs)
-        const errText = await res.text();
-        throw new Error(`Lỗi ${res.status}: ${errText.slice(0, 100)}`);
+        // Backend đã chuẩn hoá lỗi ElevenLabs thành { reason, message } — map sang câu dễ hiểu.
+        let reason = 'unknown';
+        let detail = '';
+        try {
+          const errJson = await res.json();
+          reason = errJson.reason || 'unknown';
+          detail = errJson.message || '';
+        } catch {
+          detail = await res.text().catch(() => '');
+        }
+
+        const FRIENDLY_MESSAGES: Record<string, string> = {
+          rate_limited: 'ElevenLabs đang bị giới hạn tốc độ gọi (quá nhiều request cùng lúc) — đợi vài giây rồi thử lại.',
+          quota_exceeded: 'Đã hết credit ElevenLabs cho kỳ này — đợi qua kỳ mới hoặc nâng gói trên elevenlabs.io.',
+          invalid_key: 'API key ElevenLabs không hợp lệ hoặc hết hạn — kiểm tra lại biến ELEVENLABS_API_KEY trên Vercel.',
+          unknown: `Không đọc được (lỗi ${res.status})${detail ? ': ' + detail.slice(0, 100) : ''}`,
+        };
+
+        throw new Error(FRIENDLY_MESSAGES[reason] || FRIENDLY_MESSAGES.unknown);
       }
 
       const blob = await res.blob();

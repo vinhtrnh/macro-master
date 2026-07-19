@@ -1,98 +1,141 @@
-// api/tts.ts
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import crypto from 'crypto';
-import { Redis } from '@upstash/redis';
+import { useState, useCallback, useRef } from 'react';
+import { authHeaders } from './apiAuth';
 
-// Ép dotenv load ĐÚNG file .env ở gốc project, bất kể vercel dev
-// đang chạy function từ thư mục nào
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
-
-function isAuthorized(req: any): boolean {
-  const secret = process.env.SYNC_SECRET;
-  if (!secret) return true;
-  const provided = req.headers['x-sync-secret'];
-  return provided === secret;
+// Định nghĩa ép kiểu để TypeScript không la làng vụ SpeechRecognition
+interface IWindow extends Window {
+  SpeechRecognition?: any;
+  webkitSpeechRecognition?: any;
 }
 
-function getRedis() {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
-  return new Redis({ url, token });
-}
+// Các lỗi mà đổi sang ElevenLabs Scribe (server-side, không phụ thuộc máy chủ nhận
+// dạng của Google) có cơ hội cứu được. 'not-allowed'/'no-speech' là lỗi phía người
+// dùng (chưa cấp quyền mic / không nói gì) — đổi API không giúp gì nên bỏ qua.
+const FALLBACK_WORTHY_ERRORS = new Set(['network', 'audio-capture', 'service-not-allowed', 'aborted']);
 
-const CACHE_TTL_SECONDS = 60 * 60 * 24; // 24h — đủ cho các câu lặp lại trong ngày (mục tiêu tập, đánh giá...)
+export function useSpeechToText() {
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false); // đang gửi audio lên ElevenLabs xử lý
+  const [recognizedText, setRecognizedText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [usedFallback, setUsedFallback] = useState(false); // true nếu lần ghi âm này dùng ElevenLabs thay vì browser
 
-export default async function handler(req: any, res: any) {
-  if (!isAuthorized(req)) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  if (req.method !== 'POST') {
-    return res.status(405).send('Method not allowed');
-  }
-
-  const { text, voiceId } = req.body;
-  if (!text || typeof text !== 'string') {
-    return res.status(400).json({ error: 'Thiếu nội dung text' });
-  }
-
-  const safeText = text.slice(0, 2000);
-  const voice = voiceId || '21m00Tcm4TlvDq8ikWAM';
-
-  // --- CACHE: text + voice giống hệt trước đó thì trả lại audio cũ, khỏi tốn credit ElevenLabs ---
-  const cacheKey = 'tts_cache:' + crypto.createHash('sha256').update(`${voice}::${safeText}`).digest('hex');
-  const redis = getRedis();
-
-  if (redis) {
+  // --- Fallback: ghi âm thô bằng MediaRecorder, gửi lên /api/stt (ElevenLabs Scribe) ---
+  const startElevenLabsFallback = useCallback(async () => {
     try {
-      const cached = await redis.get<string>(cacheKey);
-      if (cached) {
-        const audioBuffer = Buffer.from(cached, 'base64');
-        res.setHeader('Content-Type', 'audio/mpeg');
-        res.setHeader('X-Cache', 'HIT');
-        return res.status(200).send(audioBuffer);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        setIsRecording(false);
+        setIsTranscribing(true);
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+
+        try {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const res = await fetch('/api/stt', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: audioBlob,
+          });
+          if (!res.ok) throw new Error(`Scribe lỗi (${res.status})`);
+          const data = await res.json();
+          setRecognizedText(data.text || '');
+        } catch (e: any) {
+          setError(`Lỗi Scribe AI: ${e.message || e}`);
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setUsedFallback(true);
+    } catch (e: any) {
+      setError('Không truy cập được microphone.');
+      setIsRecording(false);
+    }
+  }, []);
+
+  const startRecording = useCallback(() => {
+    setError(null);
+    setRecognizedText(null);
+    setUsedFallback(false);
+
+    const win = window as IWindow;
+    const SpeechRecognition = win.SpeechRecognition || win.webkitSpeechRecognition;
+
+    // Trình duyệt không có Web Speech API (vd Safari/iOS) -> dùng thẳng ElevenLabs Scribe
+    if (!SpeechRecognition) {
+      startElevenLabsFallback();
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'vi-VN';
+    recognition.interimResults = false; // Chỉ lấy kết quả cuối cùng cho chính xác
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsRecording(true);
+    };
+
+    recognition.onresult = (event: any) => {
+      // Lấy thẳng dòng text mà trình duyệt vừa nghe được
+      const transcript = event.results[0][0].transcript;
+      setRecognizedText(transcript);
+    };
+
+    recognition.onerror = (event: any) => {
+      if (FALLBACK_WORTHY_ERRORS.has(event.error)) {
+        console.warn(`[STT] Web Speech API lỗi "${event.error}", chuyển sang ElevenLabs Scribe...`);
+        startElevenLabsFallback();
+        return;
       }
-    } catch (e) {
-      console.warn('[TTS CACHE] Lỗi đọc cache, tiếp tục gọi ElevenLabs bình thường.', e);
+      setError(`Lỗi mic: ${event.error}`);
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+  }, [startElevenLabsFallback]);
+
+  const stopRecording = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
     }
-  }
-
-  const elevenRes = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voice}`,
-    {
-      method: 'POST',
-      headers: {
-        'xi-api-key': process.env.ELEVENLABS_API_KEY || '',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        text: safeText,
-        model_id: 'eleven_flash_v2_5',
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-      }),
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
     }
-  );
+  }, []);
 
-  if (!elevenRes.ok) {
-    const errBody = await elevenRes.text();
-    return res.status(elevenRes.status).send(errBody);
-  }
+  const cancelAudio = useCallback(() => {
+    setRecognizedText(null);
+  }, []);
 
-  const audioBuffer = Buffer.from(await elevenRes.arrayBuffer());
-
-  if (redis) {
-    try {
-      await redis.set(cacheKey, audioBuffer.toString('base64'), { ex: CACHE_TTL_SECONDS });
-    } catch (e) {
-      console.warn('[TTS CACHE] Lỗi ghi cache (không ảnh hưởng người dùng).', e);
-    }
-  }
-
-  res.setHeader('Content-Type', 'audio/mpeg');
-  res.setHeader('X-Cache', 'MISS');
-  return res.status(200).send(audioBuffer);
+  return {
+    startRecording,
+    stopRecording,
+    cancelAudio,
+    isRecording,
+    isTranscribing, // optional: hiện "đang xử lý bằng AI..." nếu muốn
+    usedFallback,   // optional: hiện badge "đã dùng ElevenLabs Scribe" nếu muốn
+    recognizedText, // Lấy thẳng text ra, không cần chờ xử lý
+    error
+  };
 }

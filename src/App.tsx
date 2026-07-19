@@ -342,6 +342,36 @@ window.suggestQuickMeal = (proteinName: string, carbName: string, fatName: strin
       delete window.addFoodDirectly;
     };
   }, [activeProfileId, consumedCalories, consumedProtein, consumedCarbs, consumedFat, targetMacros, gymLog, selectedDate]);
+  
+// --- DYNAMIC VARIABLES: đẩy context hiện tại vào widget ElevenLabs mỗi khi
+  // dữ liệu đổi, để agent "biết ngay" (tên, cân nặng, tiến độ hôm nay, lịch tập)
+  // mà không cần tốn 1 lượt tool-call round-trip đầu cuộc gọi.
+  useEffect(() => {
+    const widget = document.querySelector('elevenlabs-convai');
+    if (!widget || !activeProfile) return;
+
+    const caloriesRemaining = Math.max(0, targetMacros.calories - consumedCalories);
+    const proteinRemaining = Math.max(0, targetMacros.protein - consumedProtein);
+    const carbsRemaining = Math.max(0, targetMacros.carbs - consumedCarbs);
+    const fatRemaining = Math.max(0, targetMacros.fat - consumedFat);
+
+    const dynamicVars: Record<string, string | number> = {
+      user_name: activeProfile.name,
+      current_weight: activeProfile.weight,
+      goal: activeProfile.goal,
+      calories_consumed: consumedCalories,
+      calories_target: targetMacros.calories,
+      calories_remaining: caloriesRemaining,
+      protein_consumed: consumedProtein,
+      protein_target: targetMacros.protein,
+      protein_remaining: proteinRemaining,
+      carbs_remaining: carbsRemaining,
+      fat_remaining: fatRemaining,
+      workout_today: gymLog?.found ? gymLog.title : 'Không có lịch tập hôm nay',
+    };
+
+    widget.setAttribute('dynamic-variables', JSON.stringify(dynamicVars));
+  }, [activeProfile, consumedCalories, consumedProtein, consumedCarbs, consumedFat, targetMacros, gymLog]);
 
   const smartSuggestions = generateSmartSuggestions(
     targetMacros,
