@@ -1,8 +1,15 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
-import { isAuthorized } from './_auth';
 
+function isAuthorized(req: any): boolean {
+  const secret = process.env.SYNC_SECRET;
+  if (!secret) return true;
+  const provided = req.headers['x-sync-secret'];
+  return provided === secret;
+}
+
+// Bắt buộc load bằng mọi giá từ thư mục gốc
 const envPath = path.resolve(process.cwd(), '.env');
 const envLocalPath = path.resolve(process.cwd(), '.env.local');
 
@@ -23,8 +30,8 @@ export default async function handler(req: any, res: any) {
 
   try {
     const profileId = req.query?.profileId || '1';
-    const requestedDate = req.query?.date;
-
+    const requestedDate = req.query?.date; // Nhận biến ngày từ Frontend
+    
     const db1 = process.env.NOTION_DATABASE_1_ID || process.env.NOTION_DB_1;
     const db2 = process.env.NOTION_DATABASE_2_ID || process.env.NOTION_DB_2;
     const token = process.env.NOTION_TOKEN;
@@ -41,9 +48,12 @@ export default async function handler(req: any, res: any) {
       'Notion-Version': '2022-06-28',
     };
 
+    // Chốt ngày: Ưu tiên ngày gửi từ web lên, nếu không có thì tính giờ VN (UTC+7)
     const now = new Date(Date.now() + 7 * 60 * 60 * 1000);
     const todayISO = now.toISOString().split('T')[0];
     const targetDate = requestedDate || todayISO;
+    
+    console.log(`[API LỊCH TẬP] Quét Notion ngày: ${targetDate} cho User ${profileId}...`);
 
     const queryRes = await fetch(
       `https://api.notion.com/v1/databases/${DATABASE_ID}/query`,
@@ -51,6 +61,7 @@ export default async function handler(req: any, res: any) {
         method: 'POST',
         headers: HEADERS,
         body: JSON.stringify({
+          // Cắm targetDate vào đây để Notion lọc bài chuẩn
           filter: { property: 'Date', date: { equals: targetDate } },
         }),
       }
@@ -83,6 +94,7 @@ export default async function handler(req: any, res: any) {
       })
       .filter((line: string) => line.trim().length > 0);
 
+    // Trả về kèm theo đúng cái ngày mà người dùng đang xem
     return res.status(200).json({ found: true, title, date: targetDate, lines });
 
   } catch (error) {
