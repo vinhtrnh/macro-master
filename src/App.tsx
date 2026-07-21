@@ -560,12 +560,12 @@ const handleApplyQuickMealPlan = (proteinFood: FoodItem, carbFood: FoodItem, fat
               }`}
             />
           </div>
-          <div className="flex items-center gap-2 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
+          <div className="flex items-center gap-2 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800 flex-wrap justify-center">
             {profiles.map(p => (
               <button
                 key={p.id}
                 onClick={() => handleProfileSwap(p.id)}
-                className={`relative px-4 py-2 rounded-xl text-sm font-medium transition-all duration-300 flex items-center gap-2 ${
+                className={`relative px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all duration-300 flex items-center gap-1.5 sm:gap-2 ${
                   activeProfileId === p.id 
                     ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-semibold' 
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
